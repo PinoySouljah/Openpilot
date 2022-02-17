@@ -11,6 +11,12 @@ Description of terms:
 - openpilot Longitudinal - openpilot is able to control gas and brakes
 - Good steering torque - car has enough steering torque for comfortable highway driving
 
+## Platinum Cars
+| Make    | Model (US Market Reference) | Supported Package | openpilot Longitudinal | Longitudinal to 0mph | Lateral to 0mph | Good steering torque |
+|---------|-----------------------------|:-----------------:|:----------------------:|:--------------------:|:---------------:|:--------------------:|
+|  Buick  | Regal Essence 2022          |        All        |           ⭐           |          ⭐           |        ⭐       |          ⭐           |
+|  Honda  | Accord 2021                 |        All        |           ⭐           |          ⭐           |        ⭐       |          ⭐           |
+
 ## Gold Cars
 
 | Make    | Model (US Market Reference) | Supported Package | openpilot Longitudinal | Longitudinal to 0mph | Lateral to 0mph | Good steering torque |
