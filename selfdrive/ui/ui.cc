@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cmath>
-#include <QDebug>
 
 #include <QtConcurrent>
 
@@ -17,25 +16,8 @@
 #define BACKLIGHT_TS 10.00
 #define BACKLIGHT_OFFROAD 50
 
-std::map<std::string, int> LS_TO_IDX = {{"off", 0}, {"audible", 1}, {"silent", 2}};
-std::map<std::string, int> DF_TO_IDX = {{"traffic", 0}, {"stock", 1}, {"roadtrip", 2}, {"auto", 3}};
-
-void saInit(UIState *s) {
-  s->scene.mlButtonEnabled = false;  // reset on ignition
-
-  std::string dynamic_follow = util::read_file("/data/community/params/dynamic_follow");
-  if (dynamic_follow != "") {
-    dynamic_follow = dynamic_follow.substr(1, dynamic_follow.find_last_of('"') - 1);
-    qDebug() << "set dfButtonStatus to" << QString::fromStdString(dynamic_follow);
-    s->scene.dfButtonStatus = DF_TO_IDX[dynamic_follow];
-  }
-  std::string lane_speed_alerts = util::read_file("/data/community/params/lane_speed_alerts");
-  if (lane_speed_alerts != "") {
-    lane_speed_alerts = lane_speed_alerts.substr(1, lane_speed_alerts.find_last_of('"') - 1);
-    qDebug() << "Set lsButtonStatus to " << QString::fromStdString(lane_speed_alerts);
-    s->scene.lsButtonStatus = LS_TO_IDX[lane_speed_alerts];
-  }
-}
+#define MAX(A,B) A > B ? A : B
+#define MIN(A,B) A < B ? A : B
 
 // Projects a point in car to space to the corresponding point in full frame
 // image space.
@@ -130,12 +112,65 @@ static void update_state(UIState *s) {
   SubMaster &sm = *(s->sm);
   UIScene &scene = s->scene;
 
-  if (sm.updated("modelV2")) {
-    update_model(s, sm["modelV2"].getModelV2());
+  // fade screen brightness
+  // update screen dim
+  const float t = seconds_since_boot();
+  if (scene.started){
+    // position screen dim touch rect, which gets bigger if the screen is dimmed
+    const Rect maxspeed_rect = {bdr_s * 2, int(bdr_s * 1.5), 184, 202};
+    const int radius = 96;
+    const int center_x = maxspeed_rect.centerX();
+    const int center_y = s->fb_h - footer_h / 2;
+    scene.screen_dim_touch_rect = {
+      center_x - (1+scene.screen_dim_mode_max-scene.screen_dim_mode) * radius, 
+      center_y - (1+scene.screen_dim_mode_max-scene.screen_dim_mode) * radius, 
+      (2*(1+scene.screen_dim_mode_max-scene.screen_dim_mode)) * radius, 
+      (2*(1+scene.screen_dim_mode_max-scene.screen_dim_mode)) * radius
+    };
+
+    // undim screen smoothly to the next level for warnings
+    if (s->status == STATUS_WARNING){
+      scene.screen_dim_mode_cur = scene.screen_dim_mode + 1;
+      if (scene.screen_dim_mode_cur > scene.screen_dim_mode_max){
+        scene.screen_dim_mode_cur = scene.screen_dim_mode_max;
+      }
+    } // undim immediately to stock brightness for critical alerts
+    else if (s->status == STATUS_ALERT){
+      scene.screen_dim_mode_cur = scene.screen_dim_mode_max;
+      scene.screen_dim_fade = scene.screen_dim_modes_v[scene.screen_dim_mode_cur];
+    }
+    else{
+      scene.screen_dim_mode_cur = scene.screen_dim_mode;
+    }
+
+    // when dim mode is changed, compute new fade step based on current and target value
+    // it always takes the same amount of time to go achieve the brightness difference
+    if (scene.screen_dim_mode_cur != scene.screen_dim_mode_last){
+      scene.screen_dim_fade_step = scene.screen_dim_modes_v[scene.screen_dim_mode_cur] - scene.screen_dim_modes_v[scene.screen_dim_mode_last];
+      scene.screen_dim_fade_step /= (scene.screen_dim_fade_step > 0 ? scene.screen_dim_fade_dur_up : scene.screen_dim_fade_dur_down);
+    }
+
+    // step the brightness up or down as necessary to achieve the target level,
+    // setting to the target level exactly once it's reached/passed
+    if (scene.screen_dim_fade > scene.screen_dim_modes_v[scene.screen_dim_mode_cur]){
+      scene.screen_dim_fade += scene.screen_dim_fade_step * (t - scene.screen_dim_fade_last_t);
+      if (scene.screen_dim_fade < scene.screen_dim_modes_v[scene.screen_dim_mode_cur])
+        scene.screen_dim_fade = scene.screen_dim_modes_v[scene.screen_dim_mode_cur];
+    }
+    else if (scene.screen_dim_fade < scene.screen_dim_modes_v[scene.screen_dim_mode_cur]){
+      scene.screen_dim_fade += scene.screen_dim_fade_step * (t - scene.screen_dim_fade_last_t);
+      if (scene.screen_dim_fade > scene.screen_dim_modes_v[scene.screen_dim_mode_cur])
+        scene.screen_dim_fade = scene.screen_dim_modes_v[scene.screen_dim_mode_cur];
+    }
   }
-  if (sm.updated("radarState") && sm.rcv_frame("modelV2") >= s->scene.started_frame) {
-    update_leads(s, sm["radarState"].getRadarState(), sm["modelV2"].getModelV2().getPosition());
+  else{ // revert to stock brightness when offroad
+    scene.screen_dim_mode_cur = scene.screen_dim_mode_max;
+    scene.screen_dim_fade = scene.screen_dim_modes_v[scene.screen_dim_mode_cur];
+    scene.screen_dim_touch_rect = {1,1,1,1};
   }
+  scene.screen_dim_mode_last = scene.screen_dim_mode_cur;
+  scene.screen_dim_fade_last_t = t;
+
   if (sm.updated("liveCalibration")) {
     auto rpy_list = sm["liveCalibration"].getLiveCalibration().getRpyCalib();
     Eigen::Vector3d rpy;
@@ -150,6 +185,14 @@ static void update_state(UIState *s) {
       for (int j = 0; j < 3; j++) {
         scene.view_from_calib.v[i*3 + j] = view_from_calib(i,j);
       }
+    }
+  }
+  if (s->worldObjectsVisible()) {
+    if (sm.updated("modelV2")) {
+      update_model(s, sm["modelV2"].getModelV2());
+    }
+    if (sm.updated("radarState") && sm.rcv_frame("modelV2") >= s->scene.started_frame) {
+      update_leads(s, sm["radarState"].getRadarState(), sm["modelV2"].getModelV2().getPosition());
     }
   }
   if (sm.updated("pandaStates")) {
@@ -185,16 +228,22 @@ static void update_state(UIState *s) {
       }
     }
   }
-  if (sm.updated("roadCameraState")) {
+  if (!Hardware::TICI() && sm.updated("roadCameraState")) {
     auto camera_state = sm["roadCameraState"].getRoadCameraState();
 
     float max_lines = Hardware::EON() ? 5408 : 1904;
     float max_gain = Hardware::EON() ? 1.0: 10.0;
     float max_ev = max_lines * max_gain;
 
-    if (Hardware::TICI()) {
-      max_ev /= 6;
-    }
+    float ev = camera_state.getGain() * float(camera_state.getIntegLines());
+
+    scene.light_sensor = std::clamp<float>(1.0 - (ev / max_ev), 0.0, 1.0);
+  } else if (Hardware::TICI() && sm.updated("wideRoadCameraState")) {
+    auto camera_state = sm["wideRoadCameraState"].getWideRoadCameraState();
+
+    float max_lines = 1904;
+    float max_gain = 10.0;
+    float max_ev = max_lines * max_gain / 6;
 
     float ev = camera_state.getGain() * float(camera_state.getIntegLines());
 
@@ -239,15 +288,8 @@ UIState::UIState(QObject *parent) : QObject(parent) {
   sm = std::make_unique<SubMaster, const std::initializer_list<const char *>>({
     "modelV2", "controlsState", "liveCalibration", "radarState", "deviceState", "roadCameraState",
     "pandaStates", "carParams", "driverMonitoringState", "sensorEvents", "carState", "liveLocationKalman",
+    "wideRoadCameraState",
   });
-  std::string toyota_distance_btn = util::read_file("/data/community/params/toyota_distance_btn");
-  if (toyota_distance_btn == "true") {
-    enable_distance_btn = true;
-    pm = std::make_unique<PubMaster, const std::initializer_list<const char *>>({"laneSpeedButton", "modelLongButton"});
-  } else {
-    enable_distance_btn = false;
-    pm = std::make_unique<PubMaster, const std::initializer_list<const char *>>({"laneSpeedButton", "dynamicFollowButton", "modelLongButton"});
-  }
 
   Params params;
   wide_camera = Hardware::TICI() ? params.getBool("EnableWideCamera") : false;
@@ -318,6 +360,9 @@ void Device::updateBrightness(const UIState &s) {
   int brightness = brightness_filter.update(clipped_brightness);
   if (!awake) {
     brightness = 0;
+  }
+  else if (s.scene.started && s.scene.screen_dim_fade < 1.0){
+    brightness = std::clamp(int(float(brightness) * s.scene.screen_dim_fade),1,100);
   }
 
   if (brightness != last_brightness) {
