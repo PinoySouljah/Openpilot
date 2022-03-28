@@ -27,6 +27,12 @@ INCLINE_ACCEL_MAX_SPORT_FACTOR = 0.9 # acceleration will never be increased to m
 DECLINE_ACCEL_FACTOR = 0.5 # this factor of g accel is used to lower max accel limit so you don't floor it downhill
 DECLINE_ACCEL_MIN = 0.2 # [m/s^2] don't decrease acceleration limit due to decline below this total value
 
+RHO_BP = [0., 4000.]
+RHO_V = [1.225, 0.3901] # [kg/m^3] air density at 0m and 4000m
+CD_FROM_MASS_BP = [1607., 2729.] # using volt and suburban as low/high mass
+CD_FROM_MASS_V = [0.28, 0.42] # drag coefficient for volt and suburban (latter guessed based on 2014 silverado)
+A2_FROM_MASS_V = [2.2, 3.6] # [m^2] cross-sectional area of volt and "large SUV"
+
 ButtonType = car.CarState.ButtonEvent.Type
 EventName = car.CarEvent.EventName
 
@@ -36,7 +42,7 @@ class CarInterface(CarInterfaceBase):
   params = CarControllerParams()
   
   @staticmethod
-  def get_pid_accel_limits(CP, current_speed, cruise_speed, CI = None):
+  def get_pid_accel_limits(CP, current_speed, cruise_speed, CI = None, altitude = 0.):
     following = CI.CS.coasting_lead_d > 0. and CI.CS.coasting_lead_d < 45.0 and CI.CS.coasting_lead_v > current_speed
     accel_limits = calc_cruise_accel_limits(current_speed, following, CI.CS.accel_mode)
     
@@ -50,6 +56,14 @@ class CarInterface(CarInterfaceBase):
       accel_limits[1] = max(accel_limits[1], min(INCLINE_ACCEL_MAX_SPORT_FACTOR * interp(current_speed, _A_CRUISE_MAX_BP, _A_CRUISE_MAX_V_SPORT), g_accel * interp(current_speed, INCLINE_ACCEL_SCALE_BP, INCLINE_ACCEL_SCALE_V)))
     else:
       accel_limits[1] = max(DECLINE_ACCEL_MIN, accel_limits[1] + g_accel * DECLINE_ACCEL_FACTOR)
+      
+    # increase based on speed, assuming drag goes as mass (since I don't have drag coefficient or cross-sectional area info)
+    cd = interp(CP.mass, CD_FROM_MASS_BP, CD_FROM_MASS_V)
+    a2 = interp(CP.mass, CD_FROM_MASS_BP, A2_FROM_MASS_V)
+    rho = interp(altitude, RHO_BP, RHO_V)
+    a_drag = (cd * a2 * 0.5 * rho * current_speed**2) / CP.mass
+    
+    accel_limits[1] = min(INCLINE_ACCEL_MAX_SPORT_FACTOR * interp(current_speed, _A_CRUISE_MAX_BP, _A_CRUISE_MAX_V_SPORT), accel_limits[1] + a_drag)
     
     time_since_engage = CI.CS.t - CI.CS.cruise_enabled_last_t
     if time_since_engage < CI.CS.cruise_enabled_neg_accel_ramp_bp[-1]:
