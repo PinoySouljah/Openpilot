@@ -76,7 +76,7 @@ class Controls:
 
     self.sm = sm
     if self.sm is None:
-      ignore = ['driverCameraState', 'managerState'] if SIMULATION else None
+      ignore = ['driverCameraState', 'managerState'] if SIMULATION else ['gpsLocationExternal']
       self.sm = messaging.SubMaster(['deviceState', 'pandaState', 'modelV2', 'liveCalibration',
                                      'driverMonitoringState', 'longitudinalPlan', 'lateralPlan', 'liveLocationKalman',
                                      'managerState', 'liveParameters', 'radarState', 'gpsLocationExternal'] + self.camera_packets + joystick_packet,
@@ -532,8 +532,8 @@ class Controls:
 
     if not self.joystick_mode:
       # accel PID loop
-      if sec_since_boot() > 120.: # wait 2 minutes before querying GPS, could be slow to respond and cause a comm RSOD
-        altitude = self.sm['gpsLocationExternal'].altitude if self.sm['gpsLocationExternal'].accuracy != 0.0 else 500.
+      if self.sm.alive['gpsLocationExternal'] and self.sm['gpsLocationExternal'].accuracy != 0.0: 
+        altitude = self.sm['gpsLocationExternal'].altitude
       else:
         altitude = 1600. #denver
       pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, self.v_cruise_kph * CV.KPH_TO_MS, self.CI, altitude)
