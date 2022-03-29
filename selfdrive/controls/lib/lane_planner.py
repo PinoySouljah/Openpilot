@@ -26,11 +26,11 @@ class LaneOffset:
   DUR = 2.0 # [s] time it takes to switch lane positions
   STEP = OFFSET / DUR * DT_MDL * LANE_WIDTH_DEFAULT
   
-  def __init__(self, mass = 0.):
+  def __init__(self, mass=0.):
     self.offset = 0.
-    self.offset_scale = interp(mass, [1607., 2729.], [1., 0.7]) # scales down offset based on vehicle width (assumed to go as mass)
+    self.offset_scale = interp(float(mass), [1607., 2729.], [1., 0.7]) # scales down offset based on vehicle width (assumed to go as mass)
     
-  def update(self, lane_pos = 0., lane_width = LANE_WIDTH_DEFAULT): # 0., 1., -1. = center, left, right
+  def update(self, lane_pos=0., lane_width=LANE_WIDTH_DEFAULT): # 0., 1., -1. = center, left, right
     offset = self.OFFSET * self.offset_scale * lane_pos * lane_width
     if offset > self.offset:
       self.offset = min(offset, self.offset + self.STEP)
@@ -39,7 +39,7 @@ class LaneOffset:
     return clip(self.offset, -self.OFFSET_MAX, self.OFFSET_MAX)
   
 class LanePlanner:
-  def __init__(self, wide_camera=False, mass = 0.):
+  def __init__(self, wide_camera=False, mass=0.):
     self.ll_t = np.zeros((TRAJECTORY_SIZE,))
     self.ll_x = np.zeros((TRAJECTORY_SIZE,))
     self.lll_y = np.zeros((TRAJECTORY_SIZE,))
