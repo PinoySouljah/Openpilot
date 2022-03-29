@@ -532,7 +532,11 @@ class Controls:
 
     if not self.joystick_mode:
       # accel PID loop
-      pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, self.v_cruise_kph * CV.KPH_TO_MS, self.CI, self.sm['gpsLocationExternal'].altitude if self.sm['gpsLocationExternal'].accuracy != 0.0 else 500.)
+      if sec_since_boot() > 120.: # wait 2 minutes before querying GPS, could be slow to respond and cause a comm RSOD
+        altitude = self.sm['gpsLocationExternal'].altitude if self.sm['gpsLocationExternal'].accuracy != 0.0 else 500.
+      else:
+        altitude = 1600. #denver
+      pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, self.v_cruise_kph * CV.KPH_TO_MS, self.CI, altitude)
       t_since_plan = (self.sm.frame - self.sm.rcv_frame['longitudinalPlan']) * DT_CTRL
       actuators.accel = self.LoC.update(self.active, CS, self.CP, long_plan, pid_accel_limits, t_since_plan)
       
