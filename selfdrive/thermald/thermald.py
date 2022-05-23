@@ -307,6 +307,8 @@ def thermald_thread(end_event, hw_queue):
 
     # Handle offroad/onroad transition
     should_start = all(onroad_conditions.values())
+    if no_harness_offroad:
+       should_start = should_start and HARDWARE.get_usb_present()
     if started_ts is None:
       should_start = should_start and all(startup_conditions.values())
 
@@ -314,6 +316,9 @@ def thermald_thread(end_event, hw_queue):
       params.put_bool("IsOnroad", should_start)
       params.put_bool("IsOffroad", not should_start)
 
+      no_harness_offroad = params.get_bool("NoOffroadFix")
+      peripheral_state_last = None
+      
       params.put_bool("IsEngaged", False)
       engaged_prev = False
       HARDWARE.set_power_save(not should_start)
@@ -357,6 +362,11 @@ def thermald_thread(end_event, hw_queue):
     # Check if we need to disable charging (handled by boardd)
     msg.deviceState.chargingDisabled = power_monitor.should_disable_charging(onroad_conditions["ignition"], in_car, off_ts)
 
+    if no_harness_offroad and (peripheral_state_last == peripheralState) and not msg.deviceState.usbOnline:
+       time.sleep(10)
+       HARDWARE.shutdown()
+     peripheral_state_last = peripheralState
+    
     # Check if we need to shut down
     if power_monitor.should_shutdown(peripheralState, onroad_conditions["ignition"], in_car, off_ts, started_seen):
       cloudlog.warning(f"shutting device down, offroad since {off_ts}")
