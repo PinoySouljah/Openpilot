@@ -193,6 +193,16 @@ def thermald_thread(end_event, hw_queue):
 
   fan_controller = None
 
+   # Leave flag for loggerd to indicate device was left onroad
+   if params.get_bool("IsOnroad"):
+     params.put_bool("BootedOnroad", True)
+
+   no_harness_offroad = params.get_bool("NoOffroadFix")
+   peripheral_state_last = None
+
+   while True:
+     pandaStates = messaging.recv_sock(pandaState_sock, wait=True)
+  
   while not end_event.is_set():
     sm.update(PANDA_STATES_TIMEOUT)
 
@@ -315,9 +325,6 @@ def thermald_thread(end_event, hw_queue):
     if should_start != should_start_prev or (count == 0):
       params.put_bool("IsOnroad", should_start)
       params.put_bool("IsOffroad", not should_start)
-
-      no_harness_offroad = params.get_bool("NoOffroadFix")
-      peripheral_state_last = None
       
       params.put_bool("IsEngaged", False)
       engaged_prev = False
